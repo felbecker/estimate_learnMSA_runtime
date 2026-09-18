@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "estimate-learnmsa-runtime"
+version = "0.1.0"
+description = "Conservative wall time estimate for aligning a FASTA file with learnMSA"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+estimate-learnmsa-runtime = "estimate_learnmsa_runtime.runtime:main"
+
+[tool.setuptools]
+packages = ["estimate_learnmsa_runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
