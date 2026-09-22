@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import numpy as np
+import statistics
 import pytest
 
 from estimate_learnmsa_runtime.fasta_stats import read_fasta_stats
@@ -48,7 +48,7 @@ def test_stats_match_naive_count(
     assert stats.max_len == max(lengths)
     assert stats.total_residues == sum(lengths)
     assert stats.avg_len == pytest.approx(sum(lengths) / len(lengths))
-    assert stats.median_len == np.median(lengths)
+    assert stats.median_len == statistics.median(lengths)
 
 
 @pytest.mark.parametrize("chunk_size", [100, 16 * 1024 * 1024])
@@ -59,7 +59,7 @@ def test_stats_match_naive_count_on_file(chunk_size: int) -> None:
     assert stats.num_seqs == len(lengths)
     assert stats.max_len == max(lengths)
     assert stats.total_residues == sum(lengths)
-    assert stats.median_len == np.median(lengths)
+    assert stats.median_len == statistics.median(lengths)
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,8 @@
 
 Prints a conservative wall time estimate for aligning a protein FASTA file
 with [learnMSA](https://github.com/Gaius-Augustus/learnMSA), e.g. to set the
-time limit of a cluster job. It does not need learnMSA, only numpy.
+time limit of a cluster job. It needs neither learnMSA nor any other
+dependency.
 
 ## Installation
 

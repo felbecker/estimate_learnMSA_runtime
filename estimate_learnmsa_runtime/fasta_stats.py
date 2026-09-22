@@ -1,12 +1,11 @@
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 
-
-_NEWLINE = ord("\n")
-_HEADER = ord(">")
-_GAPS = (ord("-"), ord("."))
+# Whitespace and control characters, as bytes.translate delete tables
+_WHITESPACE = bytes(range(33))
+_NON_RESIDUES = _WHITESPACE + b"-."
 
 
 @dataclass(frozen=True)
@@ -24,8 +23,12 @@ def read_fasta_stats(
     path: str | Path, chunk_size: int = 16 * 1024 * 1024
 ) -> FastaStats:
     """Computes the number of sequences and their maximum, average and median
-    lengths in a single vectorized pass over a FASTA file, without parsing
+    lengths in a single streaming pass over a FASTA file, without parsing
     records.
+
+    Records are separated with bytes.split on "\\n>" and residues are counted
+    with bytes.translate, so the work in Python is one step per sequence,
+    however short the lines are. No numpy is needed.
 
     Gaps (- and .) and whitespace do not count towards sequence lengths, so
     aligned FASTA/A2M files yield the lengths of the unaligned sequences.
@@ -42,102 +45,84 @@ def read_fasta_stats(
         ValueError: If the file is empty or not in FASTA format.
     """
     num_headers = 0
-    # Residues of the sequence that is still open at the end of a chunk
+    # Residues of the sequence that is still open
     open_len = 0
-    max_len = 0
     total = 0
-    # Histogram of sequence lengths for the median
-    hist = np.zeros(0, dtype=np.int64)
-    carry = b""
+    # Histogram of the lengths of the complete sequences for the median
+    hist: Counter[int] = Counter()
+    in_header = False
+    # Whether the previous chunk ended with a line break (or there was none)
+    line_start = True
 
     with open(path, "rb") as f:
-        while True:
-            chunk = f.read(chunk_size)
-            eof = not chunk
-            buf = carry + chunk
-            if eof:
-                carry = b""
-            else:
-                # Only process complete lines, the rest goes to the next chunk
-                cut = buf.rfind(b"\n") + 1
-                buf, carry = buf[:cut], buf[cut:]
-                if not buf:
+        while chunk := f.read(chunk_size):
+            pos = 0
+            if in_header:
+                newline = chunk.find(b"\n")
+                if newline < 0:
                     continue
-            if buf:
-                arr = np.frombuffer(buf, dtype=np.uint8)
-                ends = np.flatnonzero(arr == _NEWLINE)
-                if arr[-1] != _NEWLINE:
-                    ends = np.append(ends, arr.size)
-                starts = np.empty_like(ends)
-                starts[0] = 0
-                starts[1:] = ends[:-1] + 1
-
-                nonempty = starts < ends
-                is_header = np.zeros(ends.size, dtype=bool)
-                is_header[nonempty] = arr[starts[nonempty]] == _HEADER
-
-                if num_headers == 0:
-                    first = np.flatnonzero(is_header)
-                    prefix_end = starts[first[0]] if first.size else arr.size
-                    if np.any(arr[:prefix_end] > 32):
-                        raise ValueError(f"{path} is not a FASTA file.")
-
-                residue = (arr > 32) & (arr != _GAPS[0]) & (arr != _GAPS[1])
-                cumsum = np.zeros(arr.size + 1, dtype=np.int32)
-                np.cumsum(residue, dtype=np.int32, out=cumsum[1:])
-                counts = cumsum[ends] - cumsum[starts]
-                counts[is_header] = 0
-
-                # Local sequence index of each line; 0 is the sequence that was
-                # open before this chunk (or the empty prefix of the file)
-                local = np.cumsum(is_header)
-                new_headers = int(local[-1])
-                lens = np.bincount(
-                    local, weights=counts, minlength=new_headers + 1
-                ).astype(np.int64)
-                lens[0] += open_len
-
-                # All but the last sequence are complete
-                complete = lens[:-1] if num_headers > 0 else lens[1:-1]
-                if complete.size:
-                    max_len = max(max_len, int(complete.max()))
-                    total += int(complete.sum())
-                    hist = _add_to_histogram(hist, complete)
-                open_len = int(lens[-1])
-                num_headers += new_headers
-
-            if eof:
-                break
+                in_header, pos = False, newline + 1
+            # A leading line break turns a header at the start into "\n>"
+            if pos or line_start:
+                data = b"\n" + chunk[pos:]
+            else:
+                data = chunk
+            line_start = chunk.endswith(b"\n")
+            # The text of the open sequence, then one piece per header
+            pieces = data.split(b"\n>")
+            if num_headers == 0:
+                if pieces[0].translate(None, _WHITESPACE):
+                    raise ValueError(f"{path} is not a FASTA file.")
+            else:
+                open_len += len(pieces[0].translate(None, _NON_RESIDUES))
+            if len(pieces) == 1:
+                continue
+            if num_headers:
+                hist[open_len] += 1
+                total += open_len
+            num_headers += len(pieces) - 1
+            # All but the last record are complete
+            for record in pieces[1:-1]:
+                newline = record.find(b"\n")
+                n = (
+                    0 if newline < 0
+                    else len(record[newline:].translate(None, _NON_RESIDUES))
+                )
+                hist[n] += 1
+                total += n
+            last = pieces[-1]
+            newline = last.find(b"\n")
+            in_header = newline < 0
+            open_len = (
+                0 if in_header
+                else len(last[newline:].translate(None, _NON_RESIDUES))
+            )
 
     if num_headers == 0:
         raise ValueError(f"{path} is empty or not a FASTA file.")
-    max_len = max(max_len, open_len)
+    hist[open_len] += 1
     total += open_len
-    hist = _add_to_histogram(hist, np.array([open_len]))
 
     return FastaStats(
         num_seqs=num_headers,
-        max_len=max_len,
+        max_len=max(hist),
         avg_len=total / num_headers,
         median_len=_histogram_median(hist),
         total_residues=total,
     )
 
 
-def _add_to_histogram(hist: np.ndarray, lengths: np.ndarray) -> np.ndarray:
-    counts = np.bincount(lengths)
-    if counts.size > hist.size:
-        counts[:hist.size] += hist
-        return counts
-    hist[:counts.size] += counts
-    return hist
-
-
-def _histogram_median(hist: np.ndarray) -> float:
+def _histogram_median(hist: Counter[int]) -> float:
     """Median of the values counted in hist, with the same convention as
-    np.median (mean of the two middle values for an even count)."""
-    cumsum = np.cumsum(hist)
-    n = int(cumsum[-1])
-    lower = int(np.searchsorted(cumsum, (n - 1) // 2, side="right"))
-    upper = int(np.searchsorted(cumsum, n // 2, side="right"))
-    return (lower + upper) / 2
+    statistics.median (mean of the two middle values for an even count)."""
+    n = hist.total()
+    lower_rank, upper_rank = (n - 1) // 2, n // 2
+    seen = 0
+    lower = None
+    for value in sorted(hist):
+        seen += hist[value]
+        if lower is None and seen > lower_rank:
+            lower = value
+        if seen > upper_rank:
+            return (lower + value) / 2
+    raise ValueError("Empty histogram.")

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Conservative wall time estimate for aligning a FASTA file with learnMSA"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy"]
+dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest"]
