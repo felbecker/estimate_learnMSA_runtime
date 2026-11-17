@@ -10,7 +10,6 @@ HH:MM:SS, for example:
 """
 import argparse
 import math
-from pathlib import Path
 
 from .fasta_stats import FastaStats, read_fasta_stats
 
@@ -77,16 +76,17 @@ def format_runtime(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
 
 
-def estimate_runtime(input_file: str | Path, scale: float = 1.0) -> int:
-    """Estimates a conservative wall time limit for aligning a FASTA file with
-    learnMSA, e.g. to configure a cluster job.
+def estimate_runtime(stats: FastaStats, scale: float = 1.0) -> int:
+    """Estimates a conservative wall time limit for aligning the sequences
+    described by stats with learnMSA, e.g. to configure a cluster job. Get
+    stats with read_fasta_stats, once for all estimates of a file.
 
     The estimate is deliberately loose and only depends on the number of
     sequences and their mean and median lengths. It is calibrated to cover
     runs with default settings on a GPU workstation.
 
     Args:
-        input_file: Path to the FASTA file to align.
+        stats: Statistics of the input file.
         scale: Factor applied to the estimated seconds before rounding, to
             account for different hardware (e.g. > 1 for slower machines).
 
@@ -95,11 +95,10 @@ def estimate_runtime(input_file: str | Path, scale: float = 1.0) -> int:
         one hour and to full hours above.
 
     Raises:
-        ValueError: If scale is not positive or the file is not a FASTA file.
+        ValueError: If scale is not positive.
     """
     if not scale > 0:
         raise ValueError(f"scale must be positive, got {scale}.")
-    stats = read_fasta_stats(input_file)
     return round_runtime(scale * estimate_runtime_seconds(stats))
 
 
@@ -121,7 +120,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     try:
-        minutes = estimate_runtime(args.input_file, args.scale)
+        minutes = estimate_runtime(read_fasta_stats(args.input_file), args.scale)
     except (ValueError, OSError) as e:
         parser.error(str(e))
     print(format_runtime(minutes))

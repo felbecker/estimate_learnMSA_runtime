@@ -8,7 +8,7 @@ import pytest
 from estimate_learnmsa_runtime.runtime import (
     estimate_runtime, estimate_runtime_seconds, format_runtime, round_runtime
 )
-from estimate_learnmsa_runtime.fasta_stats import FastaStats
+from estimate_learnmsa_runtime.fasta_stats import FastaStats, read_fasta_stats
 
 
 ROOT = Path(__file__).parents[1]
@@ -52,11 +52,12 @@ def test_estimate_ignores_max_len() -> None:
 
 
 def test_scale() -> None:
-    assert estimate_runtime(f"{DIR}/egf.fasta") == 15
-    assert estimate_runtime(f"{DIR}/egf.fasta", scale=100) > 60
+    stats = read_fasta_stats(f"{DIR}/egf.fasta")
+    assert estimate_runtime(stats) == 15
+    assert estimate_runtime(stats, scale=100) > 60
     for scale in [0, -1]:
         with pytest.raises(ValueError):
-            estimate_runtime(f"{DIR}/egf.fasta", scale=scale)
+            estimate_runtime(stats, scale=scale)
 
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess:

@@ -29,10 +29,13 @@ sbatch --time=$(estimate-learnmsa-runtime proteins.fasta) job.sh
 From Python:
 
 ```python
-from estimate_learnmsa_runtime import estimate_runtime, format_runtime
+from estimate_learnmsa_runtime import (
+    estimate_memory, estimate_runtime, format_runtime, read_fasta_stats
+)
 
-minutes = estimate_runtime("proteins.fasta", scale=1.0)
-print(format_runtime(minutes))
+stats = read_fasta_stats("proteins.fasta")  # one pass over the file
+print(format_runtime(estimate_runtime(stats, scale=1.0)))
+print(estimate_memory(stats, struct=True), "GiB")
 ```
 
 ## How it works
@@ -49,6 +52,33 @@ selection, decoding). The coefficients were fitted on 104 runs of learnMSA
 with default settings on a GPU workstation (HomFam and extHomFam families
 with up to 3M sequences) and multiplied by a safety factor of 2.5 that covers
 all of them, also in leave-one-out fits.
+
+## Memory
+
+```
+estimate-learnmsa-memory proteins.fasta [--struct] [--language_model]
+```
+
+prints a conservative memory estimate in GiB with Slurm's unit suffix:
+
+```
+sbatch --mem=$(estimate-learnmsa-memory proteins.fasta --struct) job.sh
+```
+
+From Python, `estimate_memory(stats, struct=..., language_model=...)` returns
+the GiB as an integer. Memory grows
+linearly with the total number of residues R:
+
+    1.25 * (4 GiB + R * (32 B + 64 B per language model))
+
+rounded up to 4 GiB steps, at least 8 GiB. `--struct` (3Di states predicted
+with ProstT5) and `--language_model` (ProtT5 embeddings) each count as one
+language model. The coefficients cover the peak proportional set size (PSS)
+of 36 extHomFam runs with default settings on a GPU workstation, with and
+without `--struct`, by at least 1.23x. The language model budget also covers
+the brief copy of the per-residue cache that learnMSA makes when many
+sequences are near-identical, which those runs did not exercise. ProtT5 was
+not measured and gets the ProstT5 budget.
 
 ## Scale
 
